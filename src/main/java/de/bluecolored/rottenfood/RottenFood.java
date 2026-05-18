@@ -1,20 +1,20 @@
 /*
  * The MIT License (MIT)
- * 
+ *
  * Copyright (c) Blue <https://www.bluecolored.de>
  * Copyright (c) CraftedNature <https://www.craftednature.de>
  * Copyright (c) contributors
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -27,329 +27,303 @@
 package de.bluecolored.rottenfood;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.URL;
-import java.nio.file.Path;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.TimeUnit;
-
-import javax.inject.Inject;
-
-import org.slf4j.Logger;
-import org.spongepowered.api.Sponge;
-import org.spongepowered.api.data.DataContainer;
-import org.spongepowered.api.data.DataQuery;
-import org.spongepowered.api.data.DataRegistration;
-import org.spongepowered.api.data.key.Keys;
-import org.spongepowered.api.data.persistence.InvalidDataException;
-import org.spongepowered.api.entity.living.player.Player;
-import org.spongepowered.api.event.Listener;
-import org.spongepowered.api.event.game.GameReloadEvent;
-import org.spongepowered.api.event.game.state.GameInitializationEvent;
-import org.spongepowered.api.event.game.state.GamePreInitializationEvent;
-import org.spongepowered.api.event.game.state.GameStartingServerEvent;
-import org.spongepowered.api.event.item.inventory.InteractInventoryEvent;
-import org.spongepowered.api.item.ItemType;
-import org.spongepowered.api.item.ItemTypes;
-import org.spongepowered.api.item.inventory.Inventory;
-import org.spongepowered.api.item.inventory.ItemStack;
-import org.spongepowered.api.item.inventory.Slot;
-import org.spongepowered.api.item.inventory.query.QueryOperationTypes;
-import org.spongepowered.api.item.inventory.type.GridInventory;
-import org.spongepowered.api.plugin.Plugin;
-import org.spongepowered.api.scheduler.Task;
-import org.spongepowered.api.text.Text;
-import org.spongepowered.api.text.serializer.TextParseException;
-import org.spongepowered.api.text.serializer.TextSerializers;
 
 import com.google.common.collect.Lists;
 
-import ninja.leaping.configurate.ConfigurationNode;
-import ninja.leaping.configurate.ConfigurationOptions;
-import ninja.leaping.configurate.commented.CommentedConfigurationNode;
-import ninja.leaping.configurate.hocon.HoconConfigurationLoader;
-import ninja.leaping.configurate.loader.ConfigurationLoader;
-import ninja.leaping.configurate.objectmapping.ObjectMappingException;
-import ninja.leaping.configurate.objectmapping.serialize.TypeSerializers;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.InventoryOpenEvent;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.PlayerInventory;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitTask;
+import org.spongepowered.configurate.ConfigurationNode;
+import org.spongepowered.configurate.hocon.HoconConfigurationLoader;
+import org.spongepowered.configurate.serialize.TypeSerializerCollection;
 
-@Plugin(
-	id = RottenFood.PLUGIN_ID,
-	name = "RottenFood",
-	version = "1.3 (API 7.4)",
-	description = "This plugin gives items an expirationdate",
-	url = "http://www.bluecolored.de/rottenfood/",
-	authors = {"Blue (TBlueF, Lukas Rieger)", "Chaaya", "BlueColored", "craftednature"}
-	)
-public class RottenFood {
+public class RottenFood extends JavaPlugin implements Listener {
 	public static final String PLUGIN_ID = "rottenfood";
-	
-	@Inject private Logger logger;
-	
+
+	public static final NamespacedKey KEY_LAST_UPDATE = new NamespacedKey(PLUGIN_ID, "last_update");
+	public static final NamespacedKey KEY_AGE = new NamespacedKey(PLUGIN_ID, "age");
+
 	private List<ItemConfig> itemConfigs;
-	
+
 	private long updateIntervall = 20;
-	private Task updateTask;
-	
+	private BukkitTask updateTask;
+
 	private String ageFormat;
-	
-	@Listener
-    public void onPreInit(GamePreInitializationEvent evt) {
-		logger.info("Pre-Initializing...");
-		
-		DataRegistration.builder()
-			.dataClass(RottenData.class)
-			.immutableClass(ImmutableRottenData.class)
-			.builder(new RottenDataBuilder())
-			.id(PLUGIN_ID + "_rottendata")
-			.name("Rotten Food")
-			.build();
 
-		TypeSerializers.getDefaultSerializers().registerType(ItemConfig.TOKEN, new ItemConfigSerializer());
-		TypeSerializers.getDefaultSerializers().registerType(ExtendedItemType.TOKEN, new ExtendedItemTypeSerializer());
-	}
-	
-	@Listener
-	public void onInit(GameInitializationEvent evt){
-		logger.info("Initializing...");
-		
+	@Override
+	public void onEnable(){
+		getLogger().info("Initializing...");
+
 		itemConfigs = Lists.newArrayList();
-		
-		try {
-			load();
-		} catch (IOException | ObjectMappingException e) {
-			logger.error("Failed to load or create config-file!", e);
-		}
 
-	}
-	
-	@Listener
-	public void onStart(GameStartingServerEvent evt){
-		logger.info("Starting...");
-		startUpdateTask();
-	}
-	
-	public void startUpdateTask(){
-		if (updateTask != null) updateTask.cancel();
-		updateTask = Sponge.getScheduler().createTaskBuilder()
-		.intervalTicks(updateIntervall)
-		.execute(() -> updatePlayerInventories())
-		.submit(this);
-	}
-	
-	public void updatePlayerInventories(){
-		for (Player p : Sponge.getServer().getOnlinePlayers()){
-			updateInventory(p.getInventory(), false);
-		}
-	}
-	
-	@Listener
-	public void onReload(GameReloadEvent evt){
-		logger.info("Reloading...");
-		
 		try {
 			load();
-		} catch (IOException | ObjectMappingException e) {
-			logger.error("Failed to load or create config-file!", e);
+		} catch (IOException e) {
+			getLogger().severe("Failed to load or create config-file!");
+			e.printStackTrace();
 			return;
 		}
-		
+
+		getServer().getPluginManager().registerEvents(this, this);
 		startUpdateTask();
 	}
-	
-	@Listener
-	public void onOpenInventory(InteractInventoryEvent.Open evt){
-		scheduleInventoryUpdate(evt.getTargetInventory(), true);
+
+	@Override
+	public void onDisable(){
+		if (updateTask != null) updateTask.cancel();
 	}
-	
-	public void scheduleInventoryUpdate(Inventory inv, boolean forceUpdate){
-		Sponge.getScheduler().createTaskBuilder()
-		.delayTicks(0 )
-		.execute(() -> updateInventory(inv, forceUpdate))
-		.submit(this);
+
+	@Override
+	public boolean onCommand(CommandSender sender, Command command, String label, String[] args){
+		if (args.length > 0 && args[0].equalsIgnoreCase("reload")){
+			getLogger().info("Reloading...");
+
+			try {
+				load();
+			} catch (IOException e) {
+				getLogger().severe("Failed to load or create config-file!");
+				e.printStackTrace();
+				return true;
+			}
+
+			startUpdateTask();
+			return true;
+		}
+		return false;
 	}
-	
-	public void updateInventory(Inventory inv, boolean forceUpdate){
-		if (inv instanceof Slot) {
-			updateItem((Slot) inv, inv, forceUpdate);
-		} else if (inv instanceof GridInventory){
-			inv.slots().forEach(i -> {
-				if (i instanceof Slot){
-					updateItem((Slot) i, inv, forceUpdate); 
-				}
-			});
-		} else {
-			for (Inventory child : inv){
-				updateInventory(child, forceUpdate);
+
+	public void startUpdateTask(){
+		if (updateTask != null) updateTask.cancel();
+		updateTask = getServer().getScheduler().runTaskTimer(this, () -> updatePlayerInventories(), 0L, updateIntervall);
+	}
+
+	public void updatePlayerInventories(){
+		for (Player p : getServer().getOnlinePlayers()){
+			updatePlayerInventory(p, false);
+		}
+	}
+
+	public void updatePlayerInventory(Player p, boolean forceUpdate){
+		PlayerInventory inv = p.getInventory();
+
+		updateInventory(inv, forceUpdate);
+
+		ItemStack[] armor = inv.getArmorContents();
+		boolean armorChanged = false;
+		for (int i = 0; i < armor.length; i++){
+			if (armor[i] == null || armor[i].getType().isAir()) continue;
+			ItemStack updated = updateItem(armor[i], inv, forceUpdate);
+			if (updated != armor[i]){
+				armor[i] = updated;
+				armorChanged = true;
+			}
+		}
+		if (armorChanged) inv.setArmorContents(armor);
+
+		ItemStack offhand = inv.getItemInOffHand();
+		if (!offhand.getType().isAir()){
+			ItemStack updated = updateItem(offhand, inv, forceUpdate);
+			if (updated != offhand){
+				inv.setItemInOffHand(updated != null ? updated : new ItemStack(Material.AIR));
 			}
 		}
 	}
-	
-	public void updateItem(Slot slot, Inventory modifierScope, boolean forceUpdate){		
-		Optional<ItemStack> ois = slot.peek();
-		
-		if (!ois.isPresent()) return;
-		
-		ItemStack is = ois.get();
-		ItemStack old = is.copy();
-		
+
+	@EventHandler
+	public void onOpenInventory(InventoryOpenEvent evt){
+		scheduleInventoryUpdate(evt.getInventory(), true);
+	}
+
+	public void scheduleInventoryUpdate(Inventory inv, boolean forceUpdate){
+		getServer().getScheduler().runTask(this, () -> updateInventory(inv, forceUpdate));
+	}
+
+	public void updateInventory(Inventory inv, boolean forceUpdate){
+		ItemStack[] contents = inv.getContents();
+		for (int i = 0; i < contents.length; i++){
+			ItemStack is = contents[i];
+			if (is == null || is.getType().isAir()) continue;
+			ItemStack updated = updateItem(is, inv, forceUpdate);
+			if (updated != is){
+				inv.setItem(i, updated);
+			}
+		}
+	}
+
+	public ItemStack updateItem(ItemStack is, Inventory modifierScope, boolean forceUpdate){
 		for (ItemConfig ic : itemConfigs){
 			if (!ic.matchesItemStack(is)) continue;
-			
-			RottenData data = is.get(RottenData.class).orElse(new RottenData());
-			long lastUpdate = data.getLastUpdate(); 
+
+			ItemMeta meta = is.getItemMeta();
+			if (meta == null) continue;
+
+			PersistentDataContainer pdc = meta.getPersistentDataContainer();
+			long lastUpdate = pdc.getOrDefault(KEY_LAST_UPDATE, PersistentDataType.LONG, -1L);
+			long age = pdc.getOrDefault(KEY_AGE, PersistentDataType.LONG, 0L);
+
 			long now = (long) Math.floor((double) System.currentTimeMillis() / (double) ic.getStackingInterval()) * ic.getStackingInterval();
-			
 			long delta = now - lastUpdate;
-			
+
 			double modifier = 1;
 			for (ItemAgeingModifierConfig mod : ic.getAgingModifiers()){
 				ExtendedItemType type = mod.getItem();
 				int count = mod.getMinItemCount();
-				
+
 				if (count > countItems(modifierScope, type)) continue;
-				
+
 				modifier *= mod.getAgeMultiplier();
 			}
-			
+
 			long modDelta = (long)((double) delta * modifier);
 			modDelta = (long) Math.floor((double) modDelta / (double) ic.getStackingInterval()) * ic.getStackingInterval();
-			
-			long newAge = data.getAge() + modDelta;
-			
-			if (lastUpdate == -1){				
+
+			long newAge = age + modDelta;
+
+			if (lastUpdate == -1){
 				newAge = 0;
 				delta = 0;
-			} 
+			}
 
-			is.offer(new RottenData(now, newAge));
-			
-			Text name = null;
-			Text lore = null;
+			Component name = null;
+			Component lore = null;
 			ItemStack newIs = is;
-			
+
 			for (ItemAgeStateConfig as : ic.getAgeStates()){
 				if (as.getAge() > newAge) break;
 
 				if (as.getName() != null) name = as.getName();
 				if (as.getLore() != null) lore = as.getLore();
-				
+
 				if (as.getReplacement() != null){
 					ExtendedItemType repl = as.getReplacement();
-					ItemType replIt = repl.getItemType();
+					Material replMat = repl.getMaterial();
 
-					if (replIt == ItemTypes.NONE || replIt == ItemTypes.AIR){
-						newIs = ItemStack.empty();
+					if (replMat == null || replMat.isAir()){
+						newIs = null;
 					} else {
-						newIs = ItemStack.of(replIt, is.getQuantity());
-
-						if (repl.isUseUnsafeDamage()) {
-							try {
-								DataContainer container = newIs.toContainer();
-								container.set(DataQuery.of("UnsafeDamage"), repl.getUnsafeDamage());
-								newIs = ItemStack.builder().fromContainer(container).build();
-							} catch (InvalidDataException e){
-								logger.error("Failed to apply unsafe-damage to item! " +
-										"(ItemStack: " + newIs + ", Damage: " + repl.getUnsafeDamage() + ")", e);
-							}
-						}
+						newIs = new ItemStack(replMat, is.getAmount());
 					}
-					
+
 					break;
 				} else {
 					newIs = is;
 				}
 			}
-			
-			List<Text> lorelist = Lists.newArrayList();
+
+			if (newIs == null) return null;
+
+			ItemStack result = newIs == is ? is.clone() : newIs;
+			ItemMeta newMeta = result.getItemMeta();
+			if (newMeta == null) return is;
+
+			newMeta.getPersistentDataContainer().set(KEY_LAST_UPDATE, PersistentDataType.LONG, now);
+			newMeta.getPersistentDataContainer().set(KEY_AGE, PersistentDataType.LONG, newAge);
+
+			List<Component> lorelist = Lists.newArrayList();
 			if (lore != null) lorelist.add(lore);
 			if (ic.isShowingAge()){
 				String ageString = formatTimeInterval(newAge, ageFormat);
-				Text ageText;
-				try {
-					ageText = TextSerializers.JSON.deserialize(ageString);
-				} catch (TextParseException ex) {
-					ageText = TextSerializers.FORMATTING_CODE.deserializeUnchecked(ageString);
-				}
-				
-				lorelist.add(ageText);
+				lorelist.add(LegacyComponentSerializer.legacyAmpersand().deserialize(ageString));
 			}
-			
-			if (name != null && !newIs.get(Keys.DISPLAY_NAME).orElse(Text.EMPTY).equals(name)) newIs.offer(Keys.DISPLAY_NAME, name);
-			if (!newIs.get(Keys.ITEM_LORE).orElse(Lists.newArrayList()).equals(lorelist)) newIs.offer(Keys.ITEM_LORE, lorelist);
 
-			if (!newIs.equalTo(old) || forceUpdate){
-				slot.set(newIs);
+			if (name != null) newMeta.displayName(name);
+			newMeta.lore(lorelist.isEmpty() ? null : lorelist);
+
+			result.setItemMeta(newMeta);
+
+			if (!result.isSimilar(is) || forceUpdate){
+				return result;
 			}
-			
-			return;
+
+			return is;
 		}
+
+		return is;
 	}
-	
-	public int countItems(Inventory i, ExtendedItemType type){
+
+	public int countItems(Inventory inv, ExtendedItemType type){
+		ItemStack[] contents;
+
+		if (inv instanceof PlayerInventory playerInv){
+			ItemStack[] main = playerInv.getContents();
+			ItemStack[] armor = playerInv.getArmorContents();
+			ItemStack[] extra = playerInv.getExtraContents();
+			contents = new ItemStack[main.length + armor.length + extra.length];
+			System.arraycopy(main, 0, contents, 0, main.length);
+			System.arraycopy(armor, 0, contents, main.length, armor.length);
+			System.arraycopy(extra, 0, contents, main.length + armor.length, extra.length);
+		} else {
+			contents = inv.getContents();
+		}
+
 		int count = 0;
-		
-		for (Inventory isl : i.query(QueryOperationTypes.ITEM_TYPE.of(type.getItemType())).slots()){
-			Slot sl = (Slot) isl;
-			ItemStack is = sl.peek().orElse(null);
+
+		for (ItemStack is : contents){
 			if (is != null && type.matches(is)){
-				count += is.getQuantity();
+				count += is.getAmount();
 			}
 		}
-		
+
 		return count;
 	}
-	
-	public void load() throws IOException, ObjectMappingException {
+
+	public void load() throws IOException {
 		List<ItemConfig> configs = Lists.newArrayList();
-		
-		Path path = Sponge.getConfigManager().getSharedConfig(this).getConfigPath();
-		
-		File file = path.toFile();
-		if (!file.exists()){
-			logger.warn("No config file found! Generating new config..");
-			logger.info("You can use '/sponge plugins reload' to reload the config file after you edited it!");
-			file.getParentFile().mkdirs();
-			file.createNewFile();
-			URL defaultConfig = this.getClass().getResource("defaultConfig.conf");
-			copyUrlToFile(defaultConfig, file);
-		}
-		
-		ConfigurationOptions opts = ConfigurationOptions.defaults();
-		ConfigurationLoader<CommentedConfigurationNode> loader = HoconConfigurationLoader.builder().setDefaultOptions(opts).setFile(file).build();
-		CommentedConfigurationNode config = loader.load();
-		
-		for (ConfigurationNode iconf : config.getNode("item-configs").getChildrenList()){
-			configs.add(iconf.getValue(ItemConfig.TOKEN));
+
+		if (!getDataFolder().exists()) getDataFolder().mkdirs();
+
+		File configFile = new File(getDataFolder(), "defaultConfig.conf");
+		if (!configFile.exists()){
+			getLogger().warning("No config file found! Generating new config..");
+			getLogger().info("You can use '/rottenfood reload' to reload the config file after you edited it!");
+			saveResource("defaultConfig.conf", false);
 		}
 
-		this.updateIntervall = config.getNode("update-intervall").getLong(20);
-		this.ageFormat = config.getNode("age-time-format").getString("&7This item is &f%D &7days old.");
-		
+		TypeSerializerCollection serializers = TypeSerializerCollection.defaults().childBuilder()
+			.register(ItemConfig.TOKEN, new ItemConfigSerializer())
+			.register(ExtendedItemType.TOKEN, new ExtendedItemTypeSerializer())
+			.build();
+
+		HoconConfigurationLoader loader = HoconConfigurationLoader.builder()
+			.path(configFile.toPath())
+			.defaultOptions(opts -> opts.serializers(serializers))
+			.build();
+
+		ConfigurationNode config = loader.load();
+
+		for (ConfigurationNode iconf : config.node("item-configs").childrenList()){
+			configs.add(iconf.get(ItemConfig.TOKEN));
+		}
+
+		this.updateIntervall = config.node("update-intervall").getLong(20);
+		this.ageFormat = config.node("age-time-format").getString("&7This item is &f%D &7days old.");
+
 		this.itemConfigs.clear();
 		this.itemConfigs = configs;
-		logger.info("Config loaded successfully!");
+		getLogger().info("Config loaded successfully!");
 	}
-	
-	private static void copyUrlToFile(URL from, File to) throws IOException {
-		try (
-			FileOutputStream fos = new FileOutputStream(to);
-			InputStream input = from.openStream();
-		){
-			byte[] buffer = new byte[4096];
-			int bytesRead = input.read(buffer);
-			while (bytesRead != -1){
-				fos.write(buffer, 0, bytesRead);
-				bytesRead = input.read(buffer);
-			}
-		}
-	}
-	
+
 	private static String formatTimeInterval(long time, String format){
 		TimeUnit c = TimeUnit.MILLISECONDS;
-		
+
 		long S = c.toSeconds(time);
 		long M = c.toMinutes(time);
 		long H = c.toHours(time);
@@ -358,7 +332,7 @@ public class RottenFood {
 		long s = c.toSeconds(time - TimeUnit.MINUTES.toMillis(M));
 		long m = c.toMinutes(time - TimeUnit.HOURS.toMillis(H));
 		long h = c.toHours(time - TimeUnit.DAYS.toMillis(D));
-		
+
 		String r = format;
 		r = r.replace("%S", "" + S);
 		r = r.replace("%M", "" + M);
@@ -367,8 +341,8 @@ public class RottenFood {
 		r = r.replace("%s", (s > 9 ? "" : "0") + s);
 		r = r.replace("%m", (m > 9 ? "" : "0") + m);
 		r = r.replace("%h", (h > 9 ? "" : "0") + h);
-		
+
 		return r;
 	}
-	
+
 }

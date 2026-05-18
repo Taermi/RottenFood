@@ -1,0 +1,20 @@
+name: RottenFood
+version: '2.0'
+main: de.bluecolored.rottenfood.RottenFood
+api-version: '1.21'
+description: This plugin gives items an expiration date
+website: http://www.bluecolored.de/rottenfood/
+authors:
+  - Blue (TBlueF, Lukas Rieger)
+  - craftednature
+
+commands:
+  rottenfood:
+    description: RottenFood plugin command
+    usage: /rottenfood reload
+    permission: rottenfood.reload
+
+permissions:
+  rottenfood.reload:
+    description: Allows reloading the RottenFood config
+    default: op

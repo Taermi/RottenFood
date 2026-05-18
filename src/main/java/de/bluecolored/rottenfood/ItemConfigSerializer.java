@@ -1,20 +1,20 @@
 /*
  * The MIT License (MIT)
- * 
+ *
  * Copyright (c) Blue <https://www.bluecolored.de>
  * Copyright (c) CraftedNature <https://www.craftednature.de>
  * Copyright (c) contributors
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -26,76 +26,79 @@
 
 package de.bluecolored.rottenfood;
 
-import com.google.common.reflect.TypeToken;
-import ninja.leaping.configurate.ConfigurationNode;
-import ninja.leaping.configurate.objectmapping.ObjectMappingException;
-import ninja.leaping.configurate.objectmapping.serialize.TypeSerializer;
-import org.spongepowered.api.text.Text;
-import org.spongepowered.api.text.serializer.TextParseException;
-import org.spongepowered.api.text.serializer.TextSerializers;
+import io.leangen.geantyref.TypeToken;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.gson.GsonComponentSerializer;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import org.checkerframework.checker.nullness.qual.Nullable;
+import org.spongepowered.configurate.ConfigurationNode;
+import org.spongepowered.configurate.serialize.SerializationException;
+import org.spongepowered.configurate.serialize.TypeSerializer;
+
+import java.lang.reflect.Type;
 
 public class ItemConfigSerializer implements TypeSerializer<ItemConfig> {
 
 	@Override
-	public ItemConfig deserialize(TypeToken<?> type, ConfigurationNode config) throws ObjectMappingException {
-		
+	public ItemConfig deserialize(Type type, ConfigurationNode config) throws SerializationException {
+
 		ItemConfig.Builder builder = ItemConfig.builder();
-		
-		for (ConfigurationNode item : config.getNode("items").getChildrenList()){
-			builder.addItem(item.getValue(ExtendedItemType.TOKEN));
+
+		for (ConfigurationNode item : config.node("items").childrenList()){
+			builder.addItem(item.get(ExtendedItemType.TOKEN));
 		}
-		
-		for (ConfigurationNode state : config.getNode("states").getChildrenList()){
-			long age = state.getNode("age").getLong(-1) * 1000;
-			if (age < 0) throw new ObjectMappingException("Config-value 'age' is missing or below zero! (must be at or above 0)");
-			
-			String sName = state.getNode("name").getString(null);
-			Text name = null;
+
+		for (ConfigurationNode state : config.node("states").childrenList()){
+			long age = state.node("age").getLong(-1) * 1000;
+			if (age < 0) throw new SerializationException("Config-value 'age' is missing or below zero! (must be at or above 0)");
+
+			String sName = state.node("name").getString();
+			Component name = null;
 			if (sName != null){
 				try {
-					name = TextSerializers.JSON.deserialize(sName);
-				} catch (TextParseException ex){
-					name = TextSerializers.FORMATTING_CODE.deserializeUnchecked(sName);
-				}
-			}
-			
-			String sLore = state.getNode("lore").getString(null);
-			Text lore = null;
-			if (sLore != null){
-				try {
-					lore = TextSerializers.JSON.deserialize(sLore);
-				} catch (TextParseException ex){
-					lore = TextSerializers.FORMATTING_CODE.deserializeUnchecked(sLore);
+					name = GsonComponentSerializer.gson().deserialize(sName);
+				} catch (Exception ex){
+					name = LegacyComponentSerializer.legacyAmpersand().deserialize(sName);
 				}
 			}
 
-			ExtendedItemType replacement = state.getNode("replacement-item").getValue(TypeToken.of(ExtendedItemType.class));
-			
+			String sLore = state.node("lore").getString();
+			Component lore = null;
+			if (sLore != null){
+				try {
+					lore = GsonComponentSerializer.gson().deserialize(sLore);
+				} catch (Exception ex){
+					lore = LegacyComponentSerializer.legacyAmpersand().deserialize(sLore);
+				}
+			}
+
+			ExtendedItemType replacement = state.node("replacement-item").get(TypeToken.get(ExtendedItemType.class));
+
 			builder.addAgeState(new ItemAgeStateConfig(age, name, lore, replacement));
 		}
 
-		for (ConfigurationNode mod : config.getNode("ageing-modifier").getChildrenList()){
-			double multiplier = mod.getNode("multiplier").getDouble(1);
+		for (ConfigurationNode mod : config.node("ageing-modifier").childrenList()){
+			double multiplier = mod.node("multiplier").getDouble(1);
 
-			ExtendedItemType item = mod.getNode("item").getValue(TypeToken.of(ExtendedItemType.class));
-			if (item == null) throw new ObjectMappingException("Config-value 'item' in 'ageing-modifier' is missing!");
-			
-			int minItems = mod.getNode("min-item-count").getInt(1);
-			if (minItems < 0) throw new ObjectMappingException("Config-value 'min-item-count' is at or below zero! (must to be above 0)");
-			
+			ExtendedItemType item = mod.node("item").get(TypeToken.get(ExtendedItemType.class));
+			if (item == null) throw new SerializationException("Config-value 'item' in 'ageing-modifier' is missing!");
+
+			int minItems = mod.node("min-item-count").getInt(1);
+			if (minItems < 0) throw new SerializationException("Config-value 'min-item-count' is at or below zero! (must to be above 0)");
+
 			builder.addAgingModifier(new ItemAgeingModifierConfig(multiplier, item, minItems));
 		}
-		
-		builder.stackingInterval(config.getNode("item-stacking-intervall").getLong(60) * 1000);
-		
-		builder.showAge(config.getNode("show-age").getBoolean(false));
-		
+
+		builder.stackingInterval(config.node("item-stacking-intervall").getLong(60) * 1000);
+
+		builder.showAge(config.node("show-age").getBoolean(false));
+
 		return builder.build();
 	}
 
 	@Override
-	public void serialize(TypeToken<?> type, ItemConfig obj, ConfigurationNode value) throws ObjectMappingException {
+	public void serialize(Type type, @Nullable ItemConfig obj, ConfigurationNode value) throws SerializationException {
 		throw new UnsupportedOperationException("Serializing is not supported for ItemConfigs!");
 	}
-	
+
 }
