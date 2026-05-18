@@ -1,6 +1,6 @@
 # RottenFood
 
-This is a [Sponge](https://www.spongepowered.org/)-plugin that gives items the abillity to age. You can config any item to change as time goes on.
+This is a Paper-plugin that gives items the abillity to age. You can config any item to change as time goes on.
 
 ## What is RottenFood doing exactly
 With **RottenFood** you can define items to get older the longer they exist.
